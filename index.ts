@@ -2,7 +2,9 @@ require("dotenv").config();
 const Twitter = require("twitter-lite");
 
 const hasTwoReplies = "1274481754255081474";
-const entryPoint = hasTwoReplies;
+const lotsOfReplies = "1274029121820033026";
+
+const entryPoint = lotsOfReplies;
 
 type Thread = {
   tweet: Tweet;
@@ -24,11 +26,36 @@ function printTweet(tweet: Tweet, indent = 0) {
   console.log();
 }
 
+const MAX_RESULTS_PER_PAGE = 100;
+
+type SearchResponse = {
+  statuses: Array<Tweet>;
+};
+
+async function search(app: any, options: any): Promise<SearchResponse> {
+  return app.get("search/tweets", options);
+}
+
 async function getReplies(app: any, tweet: Tweet): Promise<Array<Tweet>> {
-  const response = await app.get("search/tweets", {
+  const options = {
     q: `to:${tweet.user.screen_name}`,
-  });
-  return response.statuses.filter(
+    result_type: "recent",
+    count: MAX_RESULTS_PER_PAGE,
+  };
+
+  const response = await search(app, options);
+  let currentPage = response.statuses;
+  let allReplies = currentPage;
+  while (currentPage.length === MAX_RESULTS_PER_PAGE) {
+    const nextResponse = await search(app, {
+      ...options,
+      max_id: currentPage[MAX_RESULTS_PER_PAGE - 1].id_str,
+    });
+    currentPage = nextResponse.statuses;
+    allReplies = [...allReplies, ...currentPage];
+  }
+
+  return allReplies.filter(
     (t: Tweet) => t.in_reply_to_status_id_str === tweet.id_str
   );
 }
@@ -52,10 +79,10 @@ function printThread(thread: Thread, indent = 0) {
   });
 }
 
-async function main() {
+async function getApi(key: string, secret: string) {
   const user = new Twitter({
-    consumer_key: process.env.API_KEY,
-    consumer_secret: process.env.API_SECRET_KEY,
+    consumer_key: key,
+    consumer_secret: secret,
   });
 
   const response = await user.getBearerToken();
@@ -64,8 +91,26 @@ async function main() {
     bearer_token: response.access_token,
   });
 
-  const tweet = await app.get(`statuses/show/${entryPoint}`);
+  return app;
+}
 
+function assertIsString(x: unknown): string {
+  if (typeof x !== "string") {
+    throw new Error();
+  }
+  return x;
+}
+
+async function showStatus(app: any, id: string): Promise<Tweet> {
+  return app.get(`statuses/show/${id}`);
+}
+
+async function main() {
+  const key = assertIsString(process.env.API_KEY);
+  const secret = assertIsString(process.env.API_SECRET_KEY);
+  const app = await getApi(key, secret);
+
+  const tweet = await showStatus(app, entryPoint);
   const thread = await getThread(app, tweet);
   printThread(thread);
 }
